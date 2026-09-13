@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>Territory Wars — Захват территорий</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="map"></canvas>
+
+  <div id="hud" hidden>
+    <div id="leaderboard" class="panel">
+      <div class="lb-head">
+        <span>Лидеры</span>
+        <button id="lbToggle" class="icon-btn small" title="Свернуть">–</button>
+      </div>
+      <table>
+        <thead><tr><th>#</th><th class="name">Страна</th><th title="Доля территории">🗺</th><th title="Население">👥</th></tr></thead>
+        <tbody id="lbBody"></tbody>
+      </table>
+    </div>
+
+    <div id="topbar" class="panel">
+      <span id="timer">00:00</span>
+      <button id="speedBtn" class="icon-btn" title="Скорость игры">x1</button>
+      <button id="pauseBtn" class="icon-btn" title="Пауза (Пробел)">❚❚</button>
+      <button id="centerBtn" class="icon-btn" title="К моей стране (C)">⌖</button>
+      <button id="exitBtn" class="icon-btn" title="Выйти в меню">✕</button>
+    </div>
+
+    <div id="banner" class="panel" hidden></div>
+
+    <div id="bottom">
+      <div id="attacks"></div>
+      <div id="controls" class="panel">
+        <div class="row">
+          <span id="rate" class="chip green" title="Прирост населения">+0/с</span>
+          <div id="popbar" title="Население / максимум (зависит от территории)">
+            <div id="popfill"></div>
+            <span id="poptext">0 / 0</span>
+          </div>
+          <span id="terr" class="chip" title="Ваша доля суши">0%</span>
+        </div>
+        <div class="row">
+          <span id="ratioText" class="chip" title="Какую часть войск отправлять в атаку">⚔ 20% (0)</span>
+          <input id="ratio" type="range" min="1" max="100" value="20">
+        </div>
+      </div>
+    </div>
+
+    <div id="tooltip" hidden></div>
+    <div id="toasts"></div>
+    <div id="pausedLabel" hidden>ПАУЗА</div>
+  </div>
+
+  <div id="menu" class="overlay">
+    <div class="card">
+      <h1>Territory Wars</h1>
+      <p class="sub">Захватывай земли соседей. Чем больше территория — тем больше население твоей страны.</p>
+      <label class="field">
+        <span>Название страны</span>
+        <input id="optName" maxlength="20" value="Моя Империя">
+      </label>
+      <label class="field">
+        <span>Соперники: <b id="optBotsVal">30</b></span>
+        <input id="optBots" type="range" min="5" max="80" value="30">
+      </label>
+      <div class="field-row">
+        <label class="field">
+          <span>Карта</span>
+          <select id="optSize">
+            <option value="s">Маленькая</option>
+            <option value="m" selected>Средняя</option>
+            <option value="l">Большая</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Сложность</span>
+          <select id="optDiff">
+            <option value="easy">Лёгкая</option>
+            <option value="normal" selected>Нормальная</option>
+            <option value="hard">Сложная</option>
+          </select>
+        </label>
+      </div>
+      <button id="playBtn" class="primary">Играть</button>
+      <div class="help">
+        <div><b>ЛКМ</b> по пустой или чужой земле — атака</div>
+        <div><b>Перетаскивание</b> — двигать карту, <b>колесо</b> — масштаб</div>
+        <div><b>1–9, 0</b> — доля войск для атаки (10–100%)</div>
+        <div><b>Пробел</b> — пауза, <b>C</b> — к своей стране</div>
+        <div class="goal">Цель: занять 80% суши или уничтожить всех соперников</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="endScreen" class="overlay" hidden>
+    <div class="card">
+      <h1 id="endTitle"></h1>
+      <p id="endText" class="sub"></p>
+      <button id="againBtn" class="primary">Новая игра</button>
+      <button id="watchBtn" class="secondary">Смотреть дальше</button>
+    </div>
+  </div>
+
+  <script src="js/util.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/bots.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

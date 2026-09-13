@@ -1,0 +1,82 @@
+// Искусственный интеллект соперников
+(function () {
+  const TW = window.TW;
+
+  TW.Bots = {
+    init(game, p) {
+      const r = game.rnd;
+      p.bot = {
+        next: 10 + Math.floor(r() * 30),
+        aggression: TW.clamp(0.25 + r() * 0.75 + game.cfg.aggression, 0.05, 1),
+        reserve: 0.25 + r() * 0.25, // доля от максимума, ниже которой бот копит войска
+        grudge: -1, // игрок, который напал на бота
+      };
+    },
+
+    think(game) {
+      for (const p of game.players) {
+        if (p.isHuman || !p.alive) continue;
+        if (--p.bot.next > 0) continue;
+        p.bot.next = 12 + Math.floor(game.rnd() * 25);
+        this.act(game, p);
+      }
+    },
+
+    act(game, p) {
+      const bot = p.bot;
+      const max = game.maxTroops(p);
+
+      // Кто сейчас атакует этого бота — запоминаем обидчика
+      for (const a of game.attacks) {
+        if (a.target === p.id) bot.grudge = a.attacker;
+      }
+
+      if (p.troops < max * bot.reserve) return;
+
+      const o = game.owner, ter = game.map.terrain, W = game.W, N = game.N;
+      const contacts = new Map();
+      let waste = 0;
+      const look = (j) => {
+        const q = o[j];
+        if (q === p.id) return;
+        if (q < 0) { if (ter[j]) waste++; return; }
+        contacts.set(q, (contacts.get(q) || 0) + 1);
+      };
+      for (const i of p.border) {
+        const x = i % W;
+        if (x > 0) look(i - 1);
+        if (x < W - 1) look(i + 1);
+        if (i >= W) look(i - W);
+        if (i < N - W) look(i + W);
+      }
+
+      // Пока есть свободная земля — в основном расширяемся
+      if (waste > 0 && (contacts.size === 0 || game.rnd() > bot.aggression * 0.35)) {
+        game.launchAttack(p.id, -1, p.troops * (0.25 + 0.25 * bot.aggression));
+        return;
+      }
+      if (contacts.size === 0) return;
+
+      const myDensity = p.troops / Math.max(1, p.tiles);
+      let best = null, bestScore = -1;
+      for (const [id, border] of contacts) {
+        const e = game.players[id];
+        if (!e.alive) continue;
+        const d = e.troops / Math.max(1, e.tiles);
+        let s = Math.sqrt(border) * (myDensity + 1) / (d + 1);
+        if (e.isHuman) s *= game.cfg.humanFocus;
+        if (id === bot.grudge) s *= 1.8;
+        s *= 0.6 + game.rnd() * 0.8;
+        if (s > bestScore) { bestScore = s; best = e; }
+      }
+      if (!best) return;
+
+      const enemyDensity = best.troops / Math.max(1, best.tiles);
+      // Слишком сильный враг — нападаем только самые агрессивные
+      if (enemyDensity > myDensity * 1.4 && game.rnd() > bot.aggression * 0.4) return;
+      if (p.troops < max * (bot.reserve + 0.1)) return;
+
+      game.launchAttack(p.id, best.id, p.troops * (0.3 + 0.35 * bot.aggression));
+    },
+  };
+})();

@@ -1,0 +1,381 @@
+// Логика игры: территории, население, атаки
+(function () {
+  const TW = window.TW;
+  const TPS = TW.TPS;
+
+  // Во сколько раз дороже захватывать клетку данного типа местности
+  const TERRAIN_COST = [0, 1.0, 1.3, 1.7, 2.4];
+  const START_TROOPS = 2500;
+  const SPAWN_RADIUS = 3;
+
+  const DIFFICULTY = {
+    easy: { botGrowth: 0.75, aggression: -0.2, humanFocus: 0.6 },
+    normal: { botGrowth: 1.0, aggression: 0, humanFocus: 1.0 },
+    hard: { botGrowth: 1.25, aggression: 0.25, humanFocus: 1.5 },
+  };
+
+  class Game {
+    constructor(cfg) {
+      this.cfg = Object.assign({}, cfg, DIFFICULTY[cfg.difficulty] || DIFFICULTY.normal);
+      this.map = TW.generateMap(cfg.W, cfg.H, cfg.seed);
+      this.W = this.map.W;
+      this.H = this.map.H;
+      this.N = this.W * this.H;
+      this.owner = new Int16Array(this.N).fill(-1);
+      this.mark = new Uint32Array(this.N);
+      this.stamp = 0;
+      this.rnd = TW.rng(cfg.seed ^ 0x9e3779b9);
+      this.players = [];
+      this.attacks = [];
+      this.attackSeq = 0;
+      this.tick = 0;
+      this.playTick = 0;
+      this.phase = 'spawn';
+      this.spawnTicks = cfg.spawnSeconds * TPS;
+      this.events = [];
+      this.dirty = [];
+      this.result = null; // {win: bool}
+      this.createPlayers();
+    }
+
+    // ---------- Игроки ----------
+
+    createPlayers() {
+      const human = this.addPlayer(this.cfg.playerName || 'Моя Империя', [150, 80, 220], true);
+      this.human = human;
+
+      const names = TW.BOT_NAMES.slice();
+      for (let k = names.length - 1; k > 0; k--) {
+        const j = Math.floor(this.rnd() * (k + 1));
+        [names[k], names[j]] = [names[j], names[k]];
+      }
+      for (let k = 0; k < this.cfg.bots; k++) {
+        const hue = (k * 137.508 + this.rnd() * 20) % 360;
+        const sat = 0.45 + this.rnd() * 0.25;
+        const lig = 0.45 + this.rnd() * 0.15;
+        const name = k < names.length ? names[k] : names[k % names.length] + ' ' + (Math.floor(k / names.length) + 1);
+        const p = this.addPlayer(name, TW.hslToRgb(hue, sat, lig), false);
+        TW.Bots.init(this, p);
+      }
+      this.spawnBots();
+    }
+
+    addPlayer(name, color, isHuman) {
+      const p = {
+        id: this.players.length, name, color, isHuman,
+        troops: START_TROOPS, tiles: 0, sx: 0, sy: 0,
+        border: new Set(), alive: true, spawned: false,
+        maxTiles: 0, kills: 0,
+      };
+      this.players.push(p);
+      return p;
+    }
+
+    maxTroops(p) {
+      return 5000 + 80 * Math.pow(p.tiles, 0.85);
+    }
+
+    growthPerSecond(p) {
+      const max = this.maxTroops(p);
+      if (p.troops >= max) return 0;
+      const g = (20 + Math.pow(p.troops, 0.73) * 1.2) * (1 - p.troops / max);
+      return p.isHuman ? g : g * this.cfg.botGrowth;
+    }
+
+    // ---------- Появление на карте ----------
+
+    spawnBots() {
+      const land = this.map.landTiles;
+      const spots = [];
+      for (const p of this.players) {
+        if (p.isHuman) continue;
+        let minDist = Math.sqrt(this.map.landCount / (this.cfg.bots + 1)) * 0.9;
+        let placed = false;
+        for (let attempt = 0; attempt < 400 && !placed; attempt++) {
+          if (attempt % 80 === 79) minDist *= 0.7;
+          const i = land[Math.floor(this.rnd() * land.length)];
+          const x = i % this.W, y = (i / this.W) | 0;
+          if (this.owner[i] !== -1) continue;
+          if (spots.some((s) => (s[0] - x) ** 2 + (s[1] - y) ** 2 < minDist * minDist)) continue;
+          spots.push([x, y]);
+          placed = this.spawnAt(p, x, y);
+        }
+        if (!placed) p.alive = false;
+      }
+    }
+
+    spawnAt(p, cx, cy) {
+      const R = SPAWN_RADIUS;
+      let n = 0;
+      for (let dy = -R; dy <= R; dy++) {
+        for (let dx = -R; dx <= R; dx++) {
+          if (dx * dx + dy * dy > R * R + 1) continue;
+          const x = cx + dx, y = cy + dy;
+          if (x < 0 || y < 0 || x >= this.W || y >= this.H) continue;
+          const i = y * this.W + x;
+          if (this.map.terrain[i] === 0 || this.owner[i] !== -1) continue;
+          this.setOwner(i, p.id);
+          n++;
+        }
+      }
+      p.spawned = n > 0;
+      p.spawnX = cx;
+      p.spawnY = cy;
+      return p.spawned;
+    }
+
+    // Выбор места игроком (можно менять, пока идёт фаза выбора)
+    humanSpawn(x, y) {
+      if (this.phase !== 'spawn') return false;
+      const i = y * this.W + x;
+      if (this.map.terrain[i] === 0) return false;
+      const o = this.owner[i];
+      if (o >= 0 && o !== this.human.id) return false;
+      if (this.human.spawned) {
+        for (let j = 0; j < this.N; j++) if (this.owner[j] === this.human.id) this.setOwner(j, -1);
+      }
+      return this.spawnAt(this.human, x, y);
+    }
+
+    startPlay() {
+      if (!this.human.spawned) {
+        const land = this.map.landTiles;
+        for (let attempt = 0; attempt < 2000 && !this.human.spawned; attempt++) {
+          const i = land[Math.floor(this.rnd() * land.length)];
+          if (this.owner[i] === -1) this.spawnAt(this.human, i % this.W, (i / this.W) | 0);
+        }
+        this.events.push({ text: 'Место выбрано случайно', cls: 'info', focus: true });
+      }
+      this.phase = 'play';
+      this.events.push({ text: 'Игра началась! Захватывайте земли', cls: 'good' });
+    }
+
+    // ---------- Клетки ----------
+
+    isBorder(i, p) {
+      const W = this.W, o = this.owner, x = i % W;
+      if (x === 0 || x === W - 1 || i < W || i >= this.N - W) return true;
+      return o[i - 1] !== p || o[i + 1] !== p || o[i - W] !== p || o[i + W] !== p;
+    }
+
+    refreshBorder(i) {
+      const p = this.owner[i];
+      if (p < 0) return;
+      const pl = this.players[p];
+      if (this.isBorder(i, p)) pl.border.add(i);
+      else pl.border.delete(i);
+    }
+
+    setOwner(i, pid) {
+      const old = this.owner[i];
+      if (old === pid) return;
+      const W = this.W, x = i % W, y = (i / W) | 0;
+      if (old >= 0) {
+        const o = this.players[old];
+        o.tiles--; o.sx -= x; o.sy -= y;
+        o.border.delete(i);
+      }
+      this.owner[i] = pid;
+      if (pid >= 0) {
+        const p = this.players[pid];
+        p.tiles++; p.sx += x; p.sy += y;
+        if (p.tiles > p.maxTiles) p.maxTiles = p.tiles;
+      }
+      this.refreshBorder(i);
+      if (x > 0) this.refreshBorder(i - 1);
+      if (x < W - 1) this.refreshBorder(i + 1);
+      if (y > 0) this.refreshBorder(i - W);
+      if (y < this.H - 1) this.refreshBorder(i + W);
+      this.dirty.push(i);
+    }
+
+    // Есть ли у игрока общая граница с целью (-1 = ничейная земля)
+    hasContact(pid, target) {
+      const o = this.owner, ter = this.map.terrain, W = this.W, N = this.N;
+      for (const i of this.players[pid].border) {
+        const x = i % W;
+        if (x > 0 && o[i - 1] === target && ter[i - 1]) return true;
+        if (x < W - 1 && o[i + 1] === target && ter[i + 1]) return true;
+        if (i >= W && o[i - W] === target && ter[i - W]) return true;
+        if (i < N - W && o[i + W] === target && ter[i + W]) return true;
+      }
+      return false;
+    }
+
+    // ---------- Атаки ----------
+
+    launchAttack(pid, target, troops) {
+      const p = this.players[pid];
+      if (!p.alive || target === pid || this.phase !== 'play') return 'invalid';
+      if (target >= 0 && !this.players[target].alive) return 'invalid';
+      troops = Math.floor(Math.min(troops, p.troops));
+      if (troops < 1) return 'notroops';
+      if (!this.hasContact(pid, target)) return 'nocontact';
+      p.troops -= troops;
+
+      // Встречная атака: войска взаимно уничтожаются
+      if (target >= 0) {
+        const opp = this.attacks.find((a) => a.attacker === target && a.target === pid);
+        if (opp) {
+          const m = Math.min(opp.troops, troops);
+          opp.troops -= m;
+          troops -= m;
+          if (opp.troops < 1) this.removeAttack(opp);
+          if (troops < 1) return 'ok';
+        }
+      }
+
+      const ex = this.attacks.find((a) => a.attacker === pid && a.target === target);
+      if (ex) {
+        ex.troops += troops;
+      } else {
+        this.attacks.push({ id: ++this.attackSeq, attacker: pid, target, troops, lastTile: -1 });
+        if (target >= 0 && this.players[target].isHuman) {
+          this.events.push({ text: `${p.name} атакует вас!`, cls: 'bad' });
+        }
+      }
+      return 'ok';
+    }
+
+    removeAttack(a) {
+      a.dead = true;
+      const k = this.attacks.indexOf(a);
+      if (k >= 0) this.attacks.splice(k, 1);
+    }
+
+    endAttack(a, refund) {
+      if (a.dead) return;
+      this.players[a.attacker].troops += a.troops * refund;
+      this.removeAttack(a);
+    }
+
+    // Отступление по команде игрока
+    retreat(attackId) {
+      const a = this.attacks.find((x) => x.id === attackId);
+      if (a) this.endAttack(a, 0.9);
+    }
+
+    stepAttack(a) {
+      const p = this.players[a.attacker];
+      const tgt = a.target >= 0 ? this.players[a.target] : null;
+      const o = this.owner, ter = this.map.terrain, W = this.W, N = this.N;
+      const target = a.target, me = a.attacker;
+      const stamp = ++this.stamp;
+      const mark = this.mark;
+      const cands = [], keys = [];
+      const cx = p.sx / Math.max(1, p.tiles), cy = p.sy / Math.max(1, p.tiles);
+      const rnd = this.rnd;
+
+      // Приоритет клетки: ближе к центру страны, больше соседей-своих, легче местность.
+      // Так территория растёт округлыми волнами и обходит горы.
+      const consider = (j) => {
+        if (o[j] !== target || ter[j] === 0 || mark[j] === stamp) return;
+        mark[j] = stamp;
+        const x = j % W, y = (j / W) | 0;
+        let c = 0;
+        if (x > 0 && o[j - 1] === me) c++;
+        if (x < W - 1 && o[j + 1] === me) c++;
+        if (j >= W && o[j - W] === me) c++;
+        if (j < N - W && o[j + W] === me) c++;
+        const dx = x - cx, dy = y - cy;
+        cands.push(j);
+        keys.push(Math.sqrt(dx * dx + dy * dy) - c * 0.9 + (TERRAIN_COST[ter[j]] - 1) * 2.5 + rnd() * 2.2);
+      };
+
+      for (const i of p.border) {
+        const x = i % W;
+        if (x > 0) consider(i - 1);
+        if (x < W - 1) consider(i + 1);
+        if (i >= W) consider(i - W);
+        if (i < N - W) consider(i + W);
+      }
+
+      const total = cands.length;
+      if (total === 0) { this.endAttack(a, 1); return; }
+
+      const density = tgt ? tgt.troops / Math.max(1, tgt.tiles) : 0;
+      const baseCost = tgt ? 3 + density * 1.2 : 3;
+      let n = Math.ceil(a.troops / (baseCost * 60));
+      n = Math.max(2, Math.min(n, 30, Math.ceil(total * 0.3) + 1));
+
+      let order;
+      if (total <= n) order = cands.map((_, k) => k);
+      else {
+        order = cands.map((_, k) => k);
+        order.sort((u, v) => keys[u] - keys[v]);
+        order.length = n;
+      }
+
+      for (const k of order) {
+        const j = cands[k];
+        const cost = baseCost * TERRAIN_COST[ter[j]];
+        if (a.troops < cost) { this.endAttack(a, 1); return; }
+        a.troops -= cost;
+        if (tgt) tgt.troops = Math.max(0, tgt.troops - density);
+        this.setOwner(j, me);
+        a.lastTile = j;
+        if (tgt && tgt.tiles === 0) { this.eliminate(tgt, p); return; }
+      }
+      if (a.troops < 1) this.removeAttack(a);
+    }
+
+    eliminate(victim, by) {
+      victim.alive = false;
+      victim.troops = 0;
+      if (by) by.kills++;
+      for (const a of this.attacks.slice()) {
+        if (a.attacker === victim.id) this.removeAttack(a);
+        else if (a.target === victim.id) this.endAttack(a, 1);
+      }
+      if (victim.isHuman) {
+        this.events.push({ text: `Ваша страна захвачена${by ? ' (' + by.name + ')' : ''}`, cls: 'bad' });
+      } else {
+        this.events.push({
+          text: by && by.isHuman ? `Вы уничтожили: ${victim.name}` : `${victim.name} уничтожена`,
+          cls: by && by.isHuman ? 'good' : 'info',
+        });
+      }
+    }
+
+    // ---------- Тик ----------
+
+    update() {
+      this.tick++;
+      if (this.phase === 'spawn') {
+        if (--this.spawnTicks <= 0) this.startPlay();
+        return;
+      }
+      this.playTick++;
+
+      for (const p of this.players) {
+        if (p.alive) p.troops += this.growthPerSecond(p) / TPS;
+      }
+
+      TW.Bots.think(this);
+
+      const list = this.attacks.slice();
+      for (const a of list) if (!a.dead) this.stepAttack(a);
+
+      this.checkEnd();
+    }
+
+    checkEnd() {
+      if (this.result) return;
+      const h = this.human;
+      if (!h.alive || h.tiles === 0) {
+        if (h.alive) this.eliminate(h, null);
+        this.result = { win: false };
+        return;
+      }
+      const share = h.tiles / this.map.landCount;
+      const botsAlive = this.players.some((p) => !p.isHuman && p.alive);
+      if (share >= this.cfg.winShare || !botsAlive) this.result = { win: true };
+    }
+
+    ranking() {
+      return this.players.filter((p) => p.alive && p.tiles > 0).sort((a, b) => b.tiles - a.tiles || b.troops - a.troops);
+    }
+  }
+
+  TW.Game = Game;
+})();
