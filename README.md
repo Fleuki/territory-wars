@@ -1,4 +1,4 @@
-# Territory Wars
+# Земли и державы
 
 Браузерная стратегия в духе OpenFront, но без строительства: только территория, население и захват.
 
@@ -40,4 +40,15 @@
 - `js/game.js` — территории, рост населения, атаки
 - `js/bots.js` — поведение соперников
 - `js/render.js` — отрисовка карты и названий стран
-- `js/ui.js`, `js/main.js` — интерфейс, игровой цикл, управление
+- `js/ui.js`, `js/main.js` — интерфейс, главное меню, игровой цикл, управление
+- `js/platform.js` — Yandex Games SDK: Game Ready API, пауза, облачные сохранения
+
+## Яндекс Игры
+
+- Каноническое название — в `GAME_NAME.md`.
+- Тексты и настройки черновика — `yandex/texts.md`; иконка, обложка и скриншоты — в `yandex/`.
+- Архив для загрузки: `yandex/zemli-i-derzhavy.zip` (в корне архива `index.html`, `style.css`, `js/`). Пересобрать:
+
+```bash
+cd "D:/Проекты AI/TerritoryWars" && rm -f yandex/zemli-i-derzhavy.zip && python -c "import zipfile,glob; z=zipfile.ZipFile('yandex/zemli-i-derzhavy.zip','w',zipfile.ZIP_DEFLATED); [z.write(f) for f in ['index.html','style.css']+sorted(glob.glob('js/*.js'))]"
+```

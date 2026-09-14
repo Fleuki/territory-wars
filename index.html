@@ -2,13 +2,22 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-  <title>Territory Wars — Захват территорий</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>Земли и державы</title>
   <link rel="stylesheet" href="style.css">
+  <script src="https://yandex.ru/games/sdk/v2"></script>
 </head>
 <body>
   <canvas id="map"></canvas>
 
+  <!-- Экран загрузки (не интерактивный, до LoadingAPI.ready) -->
+  <div id="splash">
+    <svg class="emblem big" viewBox="0 0 100 100" aria-hidden="true"><use href="#emblem"/></svg>
+    <div class="splash-title">Земли и державы</div>
+    <div class="splash-bar"><div></div></div>
+  </div>
+
+  <!-- Игровой интерфейс -->
   <div id="hud" hidden>
     <div id="leaderboard" class="panel">
       <div class="lb-head">
@@ -16,7 +25,7 @@
         <button id="lbToggle" class="icon-btn small" title="Свернуть">–</button>
       </div>
       <table>
-        <thead><tr><th>#</th><th class="name">Страна</th><th title="Доля территории">🗺</th><th title="Население">👥</th></tr></thead>
+        <thead><tr><th>#</th><th class="name">Держава</th><th title="Доля территории">Земли</th><th title="Население">Люди</th></tr></thead>
         <tbody id="lbBody"></tbody>
       </table>
     </div>
@@ -24,8 +33,8 @@
     <div id="topbar" class="panel">
       <span id="timer">00:00</span>
       <button id="speedBtn" class="icon-btn" title="Скорость игры">x1</button>
-      <button id="pauseBtn" class="icon-btn" title="Пауза (Пробел)">❚❚</button>
-      <button id="centerBtn" class="icon-btn" title="К моей стране (C)">⌖</button>
+      <button id="pauseBtn" class="icon-btn" title="Пауза (пробел)">❚❚</button>
+      <button id="centerBtn" class="icon-btn" title="К моей державе (C)">⌖</button>
       <button id="exitBtn" class="icon-btn" title="Выйти в меню">✕</button>
     </div>
 
@@ -51,60 +60,127 @@
 
     <div id="tooltip" hidden></div>
     <div id="toasts"></div>
-    <div id="pausedLabel" hidden>ПАУЗА</div>
+    <div id="pausedLabel" hidden>Пауза</div>
   </div>
 
-  <div id="menu" class="overlay">
-    <div class="card">
-      <h1>Territory Wars</h1>
-      <p class="sub">Захватывай земли соседей. Чем больше территория — тем больше население твоей страны.</p>
-      <label class="field">
-        <span>Название страны</span>
-        <input id="optName" maxlength="20" value="Моя Империя">
-      </label>
-      <label class="field">
-        <span>Соперники: <b id="optBotsVal">30</b></span>
-        <input id="optBots" type="range" min="5" max="80" value="30">
-      </label>
-      <div class="field-row">
-        <label class="field">
-          <span>Карта</span>
-          <select id="optSize">
-            <option value="s">Маленькая</option>
-            <option value="m" selected>Средняя</option>
-            <option value="l">Большая</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>Сложность</span>
-          <select id="optDiff">
-            <option value="easy">Лёгкая</option>
-            <option value="normal" selected>Нормальная</option>
-            <option value="hard">Сложная</option>
-          </select>
-        </label>
+  <!-- Главное меню -->
+  <div id="menu" hidden>
+    <div class="menu-shade"></div>
+    <div class="menu-layout scrollable">
+      <section class="hero">
+        <svg class="emblem" viewBox="0 0 100 100" aria-hidden="true"><use href="#emblem"/></svg>
+        <h1>Земли и державы</h1>
+        <p class="tagline">Расширяй границы, захватывай соседей и построй величайшую державу на карте. Чем больше земель — тем больше народа под твоим знаменем.</p>
+        <div class="stats">
+          <div class="stat"><b id="stGames">0</b><span>партий</span></div>
+          <div class="stat"><b id="stWins">0</b><span>побед</span></div>
+          <div class="stat"><b id="stBest">0%</b><span>рекорд земель</span></div>
+          <div class="stat"><b id="stKills">0</b><span>покорено</span></div>
+        </div>
+      </section>
+
+      <section class="setup panel scrollable">
+        <div class="group">
+          <div class="label">Ваша держава</div>
+          <input id="optName" maxlength="20" value="Моя держава" autocomplete="off" spellcheck="false">
+          <div id="colors" class="colors"></div>
+        </div>
+
+        <div class="group">
+          <div class="label">Сложность</div>
+          <div class="seg" id="optDiff">
+            <button data-v="easy">Лёгкая</button>
+            <button data-v="normal">Нормальная</button>
+            <button data-v="hard">Сложная</button>
+          </div>
+          <div class="hint" id="diffHint"></div>
+        </div>
+
+        <div class="group">
+          <div class="label">Карта</div>
+          <div class="seg" id="optSize">
+            <button data-v="s">Малая</button>
+            <button data-v="m">Средняя</button>
+            <button data-v="l">Большая</button>
+          </div>
+        </div>
+
+        <div class="group">
+          <div class="label">Соперники <b id="optBotsVal">30</b></div>
+          <input id="optBots" type="range" min="5" max="80" value="30">
+        </div>
+
+        <button id="playBtn" class="primary">Играть</button>
+        <button id="helpBtn" class="secondary">Как играть</button>
+      </section>
+    </div>
+  </div>
+
+  <!-- Как играть -->
+  <div id="helpModal" class="overlay" hidden>
+    <div class="card scrollable">
+      <h2>Как играть</h2>
+      <ol class="rules">
+        <li><b>Выберите место старта</b> — кликните по любой свободной земле в первые секунды партии.</li>
+        <li><b>Население растёт само.</b> Максимум зависит от размера территории: больше земель — больше людей.</li>
+        <li><b>Атакуйте</b> — кликните по пустой земле или соседней державе. В бой уйдёт доля войск, выбранная ползунком.</li>
+        <li><b>Выбирайте цели с умом.</b> Державу с большой армией захватывать дорого, а леса, холмы и горы — дольше.</li>
+        <li><b>Цель</b> — занять 80% суши или покорить все державы.</li>
+      </ol>
+      <div class="keys">
+        <div><kbd>ЛКМ</kbd> атака</div>
+        <div><kbd>Перетаскивание</kbd> карта</div>
+        <div><kbd>Колесо</kbd> масштаб</div>
+        <div><kbd>1</kbd>–<kbd>0</kbd> доля войск</div>
+        <div><kbd>Пробел</kbd> пауза</div>
+        <div><kbd>C</kbd> к своей державе</div>
       </div>
-      <button id="playBtn" class="primary">Играть</button>
-      <div class="help">
-        <div><b>ЛКМ</b> по пустой или чужой земле — атака</div>
-        <div><b>Перетаскивание</b> — двигать карту, <b>колесо</b> — масштаб</div>
-        <div><b>1–9, 0</b> — доля войск для атаки (10–100%)</div>
-        <div><b>Пробел</b> — пауза, <b>C</b> — к своей стране</div>
-        <div class="goal">Цель: занять 80% суши или уничтожить всех соперников</div>
+      <button class="primary" data-close>Понятно</button>
+    </div>
+  </div>
+
+  <!-- Подтверждение выхода -->
+  <div id="confirmModal" class="overlay" hidden>
+    <div class="card">
+      <h2>Выйти в меню?</h2>
+      <p class="sub">Текущая партия будет потеряна.</p>
+      <div class="btn-row">
+        <button id="confirmNo" class="secondary">Остаться</button>
+        <button id="confirmYes" class="primary danger">Выйти</button>
       </div>
     </div>
   </div>
 
+  <!-- Итоги партии -->
   <div id="endScreen" class="overlay" hidden>
     <div class="card">
-      <h1 id="endTitle"></h1>
+      <h2 id="endTitle"></h2>
       <p id="endText" class="sub"></p>
-      <button id="againBtn" class="primary">Новая игра</button>
+      <button id="againBtn" class="primary">В главное меню</button>
       <button id="watchBtn" class="secondary">Смотреть дальше</button>
     </div>
   </div>
 
+  <svg width="0" height="0" style="position:absolute">
+    <defs>
+      <linearGradient id="gGold" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#ffe7a3"/>
+        <stop offset="1" stop-color="#d49b35"/>
+      </linearGradient>
+      <symbol id="emblem" viewBox="0 0 100 100">
+        <path d="M50 4 88 18v30c0 24-16 40-38 48C28 88 12 72 12 48V18Z" fill="url(#gGold)"/>
+        <path d="M50 11 81 22.5V48c0 20-13 33.5-31 40.5C32 81.5 19 68 19 48V22.5Z" fill="#1d2a44"/>
+        <path d="M50 11 81 22.5V48c0 5-1 9.5-2.5 13.5L55 48l-5-37Z" fill="#8a55e6"/>
+        <path d="M19 22.5 50 11l5 37-29 21.5C21.5 63 19 56 19 48Z" fill="#3f8cff"/>
+        <path d="M26 69.5 55 48l23.5 13.5C73 75 62.5 84 50 88.5 39 84.5 31 78 26 69.5Z" fill="#43b36a"/>
+        <path d="M50 11l5 37M26 69.5 55 48l23.5 13.5" stroke="#ffe7a3" stroke-width="2.2" fill="none" stroke-linejoin="round"/>
+        <path d="M35 34l6 5 9-10 9 10 6-5-3 14H38Z" fill="#ffe7a3" stroke="#1d2a44" stroke-width="1.5" stroke-linejoin="round"/>
+      </symbol>
+    </defs>
+  </svg>
+
   <script src="js/util.js"></script>
+  <script src="js/platform.js"></script>
   <script src="js/map.js"></script>
   <script src="js/bots.js"></script>
   <script src="js/game.js"></script>

@@ -8,12 +8,17 @@
       p.bot = {
         next: 10 + Math.floor(r() * 30),
         aggression: TW.clamp(0.25 + r() * 0.75 + game.cfg.aggression, 0.05, 1),
-        reserve: 0.25 + r() * 0.25, // доля от максимума, ниже которой бот копит войска
+        reserve: TW.clamp(0.25 + r() * 0.25 + game.cfg.reserveShift, 0.1, 0.8), // ниже этой доли от максимума бот копит войска
         grudge: -1, // игрок, который напал на бота
       };
     },
 
     think(game) {
+      if (game.tick % 10 === 0) {
+        let leader = null;
+        for (const p of game.players) if (p.alive && (!leader || p.tiles > leader.tiles)) leader = p;
+        game.leaderCache = leader;
+      }
       for (const p of game.players) {
         if (p.isHuman || !p.alive) continue;
         if (--p.bot.next > 0) continue;
@@ -58,6 +63,7 @@
       if (contacts.size === 0) return;
 
       const myDensity = p.troops / Math.max(1, p.tiles);
+      const leader = game.leaderCache;
       let best = null, bestScore = -1;
       for (const [id, border] of contacts) {
         const e = game.players[id];
@@ -65,6 +71,7 @@
         const d = e.troops / Math.max(1, e.tiles);
         let s = Math.sqrt(border) * (myDensity + 1) / (d + 1);
         if (e.isHuman) s *= game.cfg.humanFocus;
+        if (e === leader) s *= game.cfg.leaderFocus;
         if (id === bot.grudge) s *= 1.8;
         s *= 0.6 + game.rnd() * 0.8;
         if (s > bestScore) { bestScore = s; best = e; }

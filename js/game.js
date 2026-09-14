@@ -8,10 +8,12 @@
   const START_TROOPS = 2500;
   const SPAWN_RADIUS = 3;
 
+  // Сложность меняет в первую очередь поведение ботов, а не скорость их роста:
+  // иначе на сложном уровне у ботов просто быстрее «накручиваются» числа
   const DIFFICULTY = {
-    easy: { botGrowth: 0.75, aggression: -0.2, humanFocus: 0.6 },
-    normal: { botGrowth: 1.0, aggression: 0, humanFocus: 1.0 },
-    hard: { botGrowth: 1.25, aggression: 0.25, humanFocus: 1.5 },
+    easy: { botGrowth: 0.85, aggression: -0.2, humanFocus: 0.6, leaderFocus: 1.0, reserveShift: 0.1 },
+    normal: { botGrowth: 1.0, aggression: 0, humanFocus: 1.0, leaderFocus: 1.0, reserveShift: 0 },
+    hard: { botGrowth: 1.05, aggression: 0.2, humanFocus: 1.3, leaderFocus: 1.6, reserveShift: -0.05 },
   };
 
   class Game {
@@ -41,16 +43,23 @@
     // ---------- Игроки ----------
 
     createPlayers() {
-      const human = this.addPlayer(this.cfg.playerName || 'Моя Империя', [150, 80, 220], true);
+      const human = this.addPlayer(this.cfg.playerName || 'Моя держава', this.cfg.playerColor || [150, 80, 220], true);
       this.human = human;
+      if (this.cfg.demo) human.alive = false;
 
       const names = TW.BOT_NAMES.slice();
       for (let k = names.length - 1; k > 0; k--) {
         const j = Math.floor(this.rnd() * (k + 1));
         [names[k], names[j]] = [names[j], names[k]];
       }
+      const [hr, hg, hb] = human.color;
+      const mx = Math.max(hr, hg, hb), mn = Math.min(hr, hg, hb), dl = mx - mn || 1;
+      const humanHue = (mx === hr ? ((hg - hb) / dl) % 6 : mx === hg ? (hb - hr) / dl + 2 : (hr - hg) / dl + 4) * 60;
       for (let k = 0; k < this.cfg.bots; k++) {
-        const hue = (k * 137.508 + this.rnd() * 20) % 360;
+        let hue = (k * 137.508 + this.rnd() * 20) % 360;
+        // Не даём ботам цвет, похожий на цвет игрока
+        const diff = Math.abs(((hue - humanHue + 540) % 360) - 180);
+        if (!this.cfg.demo && diff < 28) hue = (hue + 60) % 360;
         const sat = 0.45 + this.rnd() * 0.25;
         const lig = 0.45 + this.rnd() * 0.15;
         const name = k < names.length ? names[k] : names[k % names.length] + ' ' + (Math.floor(k / names.length) + 1);
@@ -138,6 +147,7 @@
     }
 
     startPlay() {
+      if (this.cfg.demo) { this.phase = 'play'; return; }
       if (!this.human.spawned) {
         const land = this.map.landTiles;
         for (let attempt = 0; attempt < 2000 && !this.human.spawned; attempt++) {
@@ -360,7 +370,7 @@
     }
 
     checkEnd() {
-      if (this.result) return;
+      if (this.result || this.cfg.demo) return;
       const h = this.human;
       if (!h.alive || h.tiles === 0) {
         if (h.alive) this.eliminate(h, null);

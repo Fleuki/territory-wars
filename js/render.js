@@ -42,6 +42,8 @@
       this.cam.x = this.g.W / 2;
       this.cam.y = this.g.H / 2;
       this.cam.scale = this.fitScale() * 0.98;
+      // На вертикальном экране карта слишком мелкая — приближаем её по высоте
+      if (this.ch > this.cw * 1.2) this.cam.scale = Math.max(this.cam.scale, (this.ch * 0.62) / this.g.H);
     }
 
     focus(x, y, scale) {
@@ -179,8 +181,10 @@
         ctx.strokeRect(x0 + hx * s + 0.5, y0 + hy * s + 0.5, s - 1, s - 1);
       }
 
+      if (g.cfg.demo) ctx.globalAlpha = 0.55;
       this.drawLabels(x0, y0, s);
-      this.drawAttackCounters(x0, y0, s);
+      ctx.globalAlpha = 1;
+      if (!g.cfg.demo) this.drawAttackCounters(x0, y0, s);
 
       // Пульсирующий круг вокруг места старта во время выбора
       if (g.phase === 'spawn' && g.human.spawned) {
