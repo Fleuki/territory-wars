@@ -22,13 +22,15 @@
   const BUILDINGS = {
     factory: { name: 'Завод', icon: '🏭', cost: 400, key: 'KeyQ', hint: '+12% к приросту населения' },
     city: { name: 'Город', icon: '🏛️', cost: 300, key: 'KeyW', hint: '+2000 к максимуму населения, +2 золота/с' },
-    fort: { name: 'Крепость', icon: '🏰', cost: 250, key: 'KeyE', hint: 'Земли вокруг захватывать в 2.5 раза дороже' },
+    fort: { name: 'Крепость', icon: '🏰', cost: 250, key: 'KeyE', hint: 'Земли в радиусе 10 захватывать в 4 раза дороже, саму крепость — в 12' },
   };
   const BUILD_TYPES = Object.keys(BUILDINGS);
   const COST_GROWTH = 1.6; // каждая следующая постройка того же типа дороже
   const BUILD_SPACING = 4;
-  const FORT_RADIUS = 6;
-  const FORT_MULT = 2.5;
+  const FORT_RADIUS = 10;
+  const FORT_MULT = 4; // во столько раз дороже захват в зоне крепости
+  const FORT_KEEP = 3; // саму крепость — ещё во столько раз дороже
+  const FORT_LOSS = 0.5; // защитник теряет меньше войск на клетку в зоне крепости
   const FACTORY_BONUS = 0.12;
   const CITY_POP = 2000;
   const CITY_GOLD = 2;
@@ -157,6 +159,7 @@
     // Во сколько раз дороже захватить клетку из-за крепостей её владельца
     fortFactor(tgt, j) {
       if (!tgt || tgt.forts.size === 0) return 1;
+      if (tgt.forts.has(j)) return FORT_MULT * FORT_KEEP;
       const W = this.W, x = j % W, y = (j / W) | 0, R2 = FORT_RADIUS * FORT_RADIUS;
       for (const f of tgt.forts) {
         const dx = (f % W) - x, dy = ((f / W) | 0) - y;
@@ -382,7 +385,8 @@
         const dx = x - cx, dy = y - cy;
         cands.push(j);
         let key = Math.sqrt(dx * dx + dy * dy) - c * 0.9 + (TERRAIN_COST[ter[j]] - 1) * 2.5 + rnd() * 2.2;
-        if (fortified && this.fortFactor(tgt, j) > 1) key += 4; // укреплённые земли обходим
+        // Укреплённые земли обходим, а саму крепость берём последней
+        if (fortified) { const f = this.fortFactor(tgt, j); if (f > 1) key += f > FORT_MULT ? 30 : 8; }
         keys.push(key);
       };
 
@@ -412,10 +416,11 @@
 
       for (const k of order) {
         const j = cands[k];
-        const cost = baseCost * TERRAIN_COST[ter[j]] * (fortified ? this.fortFactor(tgt, j) : 1);
+        const fort = fortified ? this.fortFactor(tgt, j) : 1;
+        const cost = baseCost * TERRAIN_COST[ter[j]] * fort;
         if (a.troops < cost) { this.endAttack(a, 1); return; }
         a.troops -= cost;
-        if (tgt) tgt.troops = Math.max(0, tgt.troops - density);
+        if (tgt) tgt.troops = Math.max(0, tgt.troops - density * (fort > 1 ? FORT_LOSS : 1));
         this.setOwner(j, me);
         a.lastTile = j;
         if (tgt && tgt.tiles === 0) { this.eliminate(tgt, p); return; }
