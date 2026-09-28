@@ -11,9 +11,9 @@
     [230, 170, 40], [235, 110, 40], [215, 60, 70], [220, 80, 170],
   ];
   const DIFF_HINTS = {
-    easy: 'Соперники растут медленнее и реже нападают.',
-    normal: 'Честная борьба: соперники растут так же, как вы.',
-    hard: 'Соперники агрессивнее, чаще нападают на вас и объединяются против лидера.',
+    easy: 'Соперники растут медленнее, реже нападают. Перемирие 2 мин, воевать с вами может лишь 1 держава сразу.',
+    normal: 'Честная борьба: соперники растут так же, как вы. Перемирие 1 мин, против вас — не больше 2 держав сразу.',
+    hard: 'Соперники агрессивнее и охотятся на лидера. Перемирие 30 с, против вас — до 3 держав сразу.',
   };
   const DEFAULT_SAVE = {
     options: { name: 'Моя держава', bots: 30, size: 'm', diff: 'normal', color: 0 },
@@ -257,6 +257,7 @@
       }
 
       renderer.flush();
+      renderer.buildType = mode === 'game' && ui ? ui.buildType : null;
       renderer.draw(now);
 
       if (mode === 'game') {
@@ -378,6 +379,7 @@
       return;
     }
     if (!g.human.alive || Platform.isPaused()) return;
+    if (ui.buildType) { tryBuild(tile); return; }
     if (g.map.terrain[tile] === 0) return;
     const target = g.owner[tile];
     if (target === g.human.id) return;
@@ -386,10 +388,37 @@
     else if (res === 'notroops') ui.toast('Недостаточно войск', 'bad');
   }
 
+  const BUILD_MSG = {
+    gold: 'Недостаточно золота',
+    notmine: 'Стройте только на своей земле',
+    near: 'Слишком близко к другой постройке',
+  };
+
+  function tryBuild(tile) {
+    const g = game, type = ui.buildType;
+    const res = g.build(g.human.id, type, tile);
+    if (res === 'ok') {
+      ui.toast(`${TW.BUILDINGS[type].icon} ${TW.BUILDINGS[type].name}: построено`, 'good');
+      ui.selectBuild(null);
+    } else if (BUILD_MSG[res]) {
+      ui.toast(BUILD_MSG[res], 'bad');
+    } else {
+      ui.selectBuild(null);
+    }
+  }
+
+  canvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (ui) ui.selectBuild(null);
+  });
+
   window.addEventListener('keydown', (e) => {
     if (!playing() || e.target.tagName === 'INPUT') return;
+    const buildKey = TW.BUILD_TYPES.find((t) => TW.BUILDINGS[t].key === e.code);
     if (e.code === 'Space') togglePause();
     else if (e.code === 'KeyC') centerOnHuman();
+    else if (buildKey) ui.selectBuild(buildKey);
+    else if (e.code === 'Escape' && ui.buildType) ui.selectBuild(null);
     else if (e.code === 'Escape') $('exitBtn').click();
     else if (/^Digit[0-9]$/.test(e.code)) {
       const d = +e.code.slice(5);

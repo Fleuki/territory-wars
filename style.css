@@ -184,6 +184,19 @@ kbd { display: inline-block; background: rgba(255, 255, 255, 0.1); border: 1px s
 .row { display: flex; align-items: center; gap: 8px; }
 .chip { background: rgba(255, 255, 255, 0.08); border-radius: 6px; padding: 4px 8px; font-size: 13px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .chip.green { color: #7ee08a; }
+.chip.gold { color: #ffd66b; min-width: 118px; text-align: center; }
+#buildBar { flex: 1; display: flex; gap: 6px; }
+.build {
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; height: 30px; padding: 0 6px;
+  background: rgba(255, 255, 255, 0.08); color: #eef0f6; border: 1px solid transparent; border-radius: 7px;
+  font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.build:hover { background: rgba(255, 255, 255, 0.16); }
+.build .ico { font-size: 15px; }
+.build b { color: #ffd66b; font-variant-numeric: tabular-nums; }
+.build.poor b { color: #d77; }
+.build.poor { opacity: 0.7; }
+.build.on { border-color: #ffd66b; background: rgba(255, 214, 107, 0.18); }
 #popbar { position: relative; flex: 1; height: 26px; background: rgba(255, 255, 255, 0.08); border-radius: 6px; overflow: hidden; }
 #popfill { position: absolute; inset: 0 auto 0 0; width: 0; background: linear-gradient(90deg, #2f6fd6, #4f95ff); transition: width 0.1s linear; }
 #poptext { position: relative; display: block; text-align: center; line-height: 26px; font-weight: 700; font-size: 14px; font-variant-numeric: tabular-nums; }
@@ -231,4 +244,6 @@ kbd { display: inline-block; background: rgba(255, 255, 255, 0.1); border: 1px s
   #topbar { padding: 4px 6px; gap: 4px; }
   #topbar .icon-btn { min-width: 30px; height: 30px; padding: 0 6px; }
   #timer { display: none; }
+  .build .bname { display: none; }
+  .chip.gold { min-width: 0; }
 }

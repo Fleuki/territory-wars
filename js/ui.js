@@ -14,10 +14,22 @@
       this.ratio = 0.2;
       this.lastLb = 0;
       this.attackKey = '';
+      this.buildType = null; // выбранная постройка (режим строительства)
       this.el = {
         lbBody: $('lbBody'), rate: $('rate'), popfill: $('popfill'), poptext: $('poptext'),
         terr: $('terr'), ratioText: $('ratioText'), ratio: $('ratio'), banner: $('banner'),
         attacks: $('attacks'), timer: $('timer'), tooltip: $('tooltip'), toasts: $('toasts'),
+        gold: $('gold'), buildBar: $('buildBar'),
+      };
+      const keyName = (k) => k.replace('Key', '');
+      this.el.buildBar.innerHTML = TW.BUILD_TYPES.map((t) => {
+        const b = TW.BUILDINGS[t];
+        return `<button class="build" data-type="${t}" title="${b.name} (${keyName(b.key)}): ${b.hint}">` +
+          `<span class="ico">${b.icon}</span><span class="bname">${b.name}</span><b data-cost="${t}">0</b></button>`;
+      }).join('');
+      this.el.buildBar.onclick = (e) => {
+        const b = e.target.closest('button[data-type]');
+        if (b) this.selectBuild(b.dataset.type);
       };
       this.el.ratio.value = Math.round(this.ratio * 100);
       this.el.ratio.oninput = () => this.setRatio(this.el.ratio.value / 100);
@@ -27,6 +39,26 @@
       };
       this.el.toasts.innerHTML = '';
       this.el.tooltip.hidden = true;
+    }
+
+    // Повторный выбор той же постройки отменяет режим строительства
+    selectBuild(type) {
+      const g = this.g;
+      if (!type || this.buildType === type || g.phase !== 'play' || !g.human.alive) type = null;
+      this.buildType = type;
+      this.el.buildBar.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.type === type));
+      if (type) this.toast(`${TW.BUILDINGS[type].icon} Выберите клетку своей земли`, 'info');
+    }
+
+    updateBuildBar() {
+      const g = this.g, h = g.human;
+      this.el.gold.textContent = `💰 ${TW.fmt(h.gold)} (+${TW.fmt(g.phase === 'play' ? g.goldPerSecond(h) : 0)}/с)`;
+      for (const t of TW.BUILD_TYPES) {
+        const cost = g.buildCost(h, t);
+        const b = this.el.buildBar.querySelector(`b[data-cost="${t}"]`);
+        b.textContent = TW.fmt(cost);
+        b.parentNode.classList.toggle('poor', h.gold < cost);
+      }
     }
 
     setRatio(r) {
@@ -48,6 +80,7 @@
       el.poptext.textContent = `${TW.fmt(h.troops)} / ${TW.fmt(max)}`;
       el.terr.textContent = `${((h.tiles / g.map.landCount) * 100).toFixed(1)}%`;
       this.updateRatioText();
+      this.updateBuildBar();
 
       const secs = Math.floor(g.playTick / TW.TPS);
       el.timer.textContent = `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`;
@@ -112,6 +145,8 @@
           `<div>👥 ${TW.fmt(p.troops)} &nbsp; 🗺 ${((p.tiles / g.map.landCount) * 100).toFixed(1)}%</div>` +
           `<div class="muted">${TW.TERRAIN_NAMES[t]}</div>`;
       }
+      const b = g.buildings.get(tile);
+      if (b) html += `<div>${TW.BUILDINGS[b].icon} ${TW.BUILDINGS[b].name}</div>`;
       tt.innerHTML = html;
       tt.hidden = false;
       const w = tt.offsetWidth, hgt = tt.offsetHeight;

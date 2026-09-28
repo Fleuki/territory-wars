@@ -19,6 +19,7 @@
       this.labelTick = -1;
       this.cam = { x: W / 2, y: H / 2, scale: 1 };
       this.hoverTile = -1;
+      this.buildType = null;
       this.resize();
       this.fitCamera();
       for (let i = 0; i < W * H; i++) this.colorTile(i);
@@ -181,6 +182,9 @@
         ctx.strokeRect(x0 + hx * s + 0.5, y0 + hy * s + 0.5, s - 1, s - 1);
       }
 
+      this.drawBuildings(x0, y0, s);
+      if (this.buildType && this.hoverTile >= 0) this.drawBuildPreview(x0, y0, s);
+
       if (g.cfg.demo) ctx.globalAlpha = 0.55;
       this.drawLabels(x0, y0, s);
       ctx.globalAlpha = 1;
@@ -219,6 +223,66 @@
           ctx.font = `${fs * 0.8}px "Segoe UI Emoji", sans-serif`;
           ctx.fillText('👑', sx, sy - fs * 1.1);
         }
+      }
+    }
+
+    drawBuildings(x0, y0, s) {
+      const g = this.g, ctx = this.ctx, W = g.W;
+      if (!g.buildings.size) return;
+      const r = TW.clamp(s * 1.4, 3, 13);
+      const icons = r >= 7;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `${r * 1.25}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`;
+      for (const [i, type] of g.buildings) {
+        const sx = x0 + ((i % W) + 0.5) * s, sy = y0 + (((i / W) | 0) + 0.5) * s;
+        if (sx < -20 || sy < -20 || sx > this.cw + 20 || sy > this.ch + 20) continue;
+        const o = g.owner[i], c = o >= 0 ? g.players[o].color : [120, 120, 120];
+        const mine = o === g.human.id;
+        ctx.fillStyle = `rgba(${c[0] * 0.45},${c[1] * 0.45},${c[2] * 0.45},0.9)`;
+        ctx.strokeStyle = mine ? '#ffe7a3' : 'rgba(255,255,255,0.75)';
+        ctx.lineWidth = mine ? 2 : 1;
+        ctx.beginPath();
+        ctx.arc(sx, sy, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        if (icons) ctx.fillText(TW.BUILDINGS[type].icon, sx, sy + 1);
+        // Зона защиты своих крепостей видна при приближении
+        if (type === 'fort' && mine && s >= 3) {
+          ctx.strokeStyle = 'rgba(255,231,163,0.35)';
+          ctx.setLineDash([4, 4]);
+          ctx.beginPath();
+          ctx.arc(sx, sy, TW.FORT_RADIUS * s, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+      }
+    }
+
+    drawBuildPreview(x0, y0, s) {
+      const g = this.g, ctx = this.ctx, i = this.hoverTile;
+      const sx = x0 + ((i % g.W) + 0.5) * s, sy = y0 + (((i / g.W) | 0) + 0.5) * s;
+      const problem = g.buildProblem(g.human.id, this.buildType, i);
+      const ok = !problem || problem === 'gold';
+      const r = TW.clamp(s * 1.4, 7, 13);
+      ctx.globalAlpha = 0.75;
+      ctx.fillStyle = ok ? 'rgba(60,160,80,0.8)' : 'rgba(200,50,50,0.8)';
+      ctx.beginPath();
+      ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `${r * 1.25}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`;
+      ctx.fillText(TW.BUILDINGS[this.buildType].icon, sx, sy + 1);
+      ctx.globalAlpha = 1;
+      if (this.buildType === 'fort') {
+        ctx.strokeStyle = ok ? 'rgba(255,231,163,0.8)' : 'rgba(255,120,120,0.8)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        ctx.arc(sx, sy, TW.FORT_RADIUS * s, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
       }
     }
 

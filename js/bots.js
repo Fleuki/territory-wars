@@ -10,6 +10,8 @@
         aggression: TW.clamp(0.25 + r() * 0.75 + game.cfg.aggression, 0.05, 1),
         reserve: TW.clamp(0.25 + r() * 0.25 + game.cfg.reserveShift, 0.1, 0.8), // ниже этой доли от максимума бот копит войска
         grudge: -1, // игрок, который напал на бота
+        grudgeTicks: 0, // обида со временем проходит
+        builder: 0.6 + r() * 0.4, // насколько охотно бот тратит золото
       };
     },
 
@@ -33,8 +35,11 @@
 
       // Кто сейчас атакует этого бота — запоминаем обидчика
       for (const a of game.attacks) {
-        if (a.target === p.id) bot.grudge = a.attacker;
+        if (a.target === p.id) { bot.grudge = a.attacker; bot.grudgeTicks = 600; }
       }
+      if (bot.grudgeTicks > 0 && (bot.grudgeTicks -= 30) <= 0) bot.grudge = -1;
+
+      this.tryBuild(game, p);
 
       if (p.troops < max * bot.reserve) return;
 
@@ -64,15 +69,26 @@
 
       const myDensity = p.troops / Math.max(1, p.tiles);
       const leader = game.leaderCache;
+      const human = game.human;
+      // Против игрока одновременно воюет ограниченное число ботов, а в начале действует перемирие
+      let humanOk = true;
+      if (!p.isHuman && human && bot.grudge !== human.id) {
+        if (game.truceTicks > 0) humanOk = false;
+        else if (!game.attacks.some((a) => a.attacker === p.id && a.target === human.id)) {
+          let n = 0;
+          for (const a of game.attacks) if (a.target === human.id && a.attacker !== p.id) n++;
+          if (n >= game.cfg.maxOnHuman) humanOk = false;
+        }
+      }
       let best = null, bestScore = -1;
       for (const [id, border] of contacts) {
         const e = game.players[id];
-        if (!e.alive) continue;
+        if (!e.alive || (e.isHuman && !humanOk)) continue;
         const d = e.troops / Math.max(1, e.tiles);
         let s = Math.sqrt(border) * (myDensity + 1) / (d + 1);
         if (e.isHuman) s *= game.cfg.humanFocus;
         if (e === leader) s *= game.cfg.leaderFocus;
-        if (id === bot.grudge) s *= 1.8;
+        if (id === bot.grudge) s *= 1.5;
         s *= 0.6 + game.rnd() * 0.8;
         if (s > bestScore) { bestScore = s; best = e; }
       }
@@ -84,6 +100,46 @@
       if (p.troops < max * (bot.reserve + 0.1)) return;
 
       game.launchAttack(p.id, best.id, p.troops * (0.3 + 0.35 * bot.aggression));
+    },
+
+    // Строительство: в основном заводы и города, крепости — у границы с врагами
+    tryBuild(game, p) {
+      const bot = p.bot, r = game.rnd;
+      if (r() > bot.builder) return;
+      const want = { factory: 2, city: 2, fort: p.forts.size < 3 && game.playTick > 900 ? 1 : 0 };
+      let type = null, best = Infinity;
+      for (const t of TW.BUILD_TYPES) {
+        if (!want[t]) continue;
+        const k = p.built[t] / want[t];
+        if (k < best) { best = k; type = t; }
+      }
+      if (!type || p.gold < game.buildCost(p, type)) return;
+
+      const W = game.W;
+      if (type === 'fort') {
+        // Клетка на границе с другой державой, чуть вглубь своей территории
+        const o = game.owner, cx = p.sx / p.tiles, cy = p.sy / p.tiles;
+        let k = 0;
+        for (const i of p.border) {
+          if (++k > 400) break;
+          if (r() > 0.1) continue;
+          const x = i % W, y = (i / W) | 0;
+          const nb = [x > 0 ? o[i - 1] : -1, x < W - 1 ? o[i + 1] : -1, o[i - W], o[i + W]];
+          if (!nb.some((q) => q >= 0 && q !== p.id)) continue;
+          const len = Math.hypot(cx - x, cy - y) || 1;
+          const j = Math.round(y + ((cy - y) / len) * 2) * W + Math.round(x + ((cx - x) / len) * 2);
+          if (game.build(p.id, type, j) === 'ok') return;
+        }
+        return;
+      }
+      // Заводы и города — внутри страны, подальше от границ
+      const cx = p.sx / p.tiles, cy = p.sy / p.tiles, rad = Math.sqrt(p.tiles) * 0.45;
+      for (let attempt = 0; attempt < 12; attempt++) {
+        const a = r() * Math.PI * 2, d = r() * rad;
+        const x = Math.round(cx + Math.cos(a) * d), y = Math.round(cy + Math.sin(a) * d);
+        if (x < 0 || y < 0 || x >= W || y >= game.H) continue;
+        if (game.build(p.id, type, y * W + x) === 'ok') return;
+      }
     },
   };
 })();
