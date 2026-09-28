@@ -9,12 +9,33 @@
   const SPAWN_RADIUS = 3;
 
   // Сложность меняет в первую очередь поведение ботов, а не скорость их роста:
-  // иначе на сложном уровне у ботов просто быстрее «накручиваются» числа
+  // иначе на сложном уровне у ботов просто быстрее «накручиваются» числа.
+  // truce — сколько секунд боты не нападают на игрока первыми,
+  // maxOnHuman — сколько ботов могут одновременно воевать с игроком
   const DIFFICULTY = {
-    easy: { botGrowth: 0.85, aggression: -0.2, humanFocus: 0.6, leaderFocus: 1.0, reserveShift: 0.1 },
-    normal: { botGrowth: 1.0, aggression: 0, humanFocus: 1.0, leaderFocus: 1.0, reserveShift: 0 },
-    hard: { botGrowth: 1.05, aggression: 0.2, humanFocus: 1.3, leaderFocus: 1.6, reserveShift: -0.05 },
+    easy: { botGrowth: 0.8, botGold: 0.7, aggression: -0.2, humanFocus: 0.6, leaderFocus: 1.0, reserveShift: 0.1, truce: 120, maxOnHuman: 1 },
+    normal: { botGrowth: 1.0, botGold: 1.0, aggression: 0, humanFocus: 1.0, leaderFocus: 1.0, reserveShift: 0, truce: 60, maxOnHuman: 2 },
+    hard: { botGrowth: 1.0, botGold: 1.0, aggression: 0.15, humanFocus: 1.15, leaderFocus: 1.3, reserveShift: -0.05, truce: 30, maxOnHuman: 3 },
   };
+
+  // Постройки покупаются за золото и достаются тому, кто захватит их клетку
+  const BUILDINGS = {
+    factory: { name: 'Завод', icon: '🏭', cost: 400, key: 'KeyQ', hint: '+12% к приросту населения' },
+    city: { name: 'Город', icon: '🏛️', cost: 300, key: 'KeyW', hint: '+2000 к максимуму населения, +2 золота/с' },
+    fort: { name: 'Крепость', icon: '🏰', cost: 250, key: 'KeyE', hint: 'Земли вокруг захватывать в 2.5 раза дороже' },
+  };
+  const BUILD_TYPES = Object.keys(BUILDINGS);
+  const COST_GROWTH = 1.6; // каждая следующая постройка того же типа дороже
+  const BUILD_SPACING = 4;
+  const FORT_RADIUS = 6;
+  const FORT_MULT = 2.5;
+  const FACTORY_BONUS = 0.12;
+  const CITY_POP = 2000;
+  const CITY_GOLD = 2;
+  const START_GOLD = 100;
+  TW.BUILDINGS = BUILDINGS;
+  TW.BUILD_TYPES = BUILD_TYPES;
+  TW.FORT_RADIUS = FORT_RADIUS;
 
   class Game {
     constructor(cfg) {
@@ -37,6 +58,8 @@
       this.events = [];
       this.dirty = [];
       this.result = null; // {win: bool}
+      this.buildings = new Map(); // клетка -> тип постройки
+      this.truceTicks = cfg.demo ? 0 : this.cfg.truce * TPS;
       this.createPlayers();
     }
 
@@ -75,20 +98,71 @@
         troops: START_TROOPS, tiles: 0, sx: 0, sy: 0,
         border: new Set(), alive: true, spawned: false,
         maxTiles: 0, kills: 0,
+        gold: START_GOLD, built: { factory: 0, city: 0, fort: 0 }, forts: new Set(),
       };
       this.players.push(p);
       return p;
     }
 
     maxTroops(p) {
-      return 5000 + 80 * Math.pow(p.tiles, 0.85);
+      return 5000 + 80 * Math.pow(p.tiles, 0.85) + CITY_POP * p.built.city;
     }
 
     growthPerSecond(p) {
       const max = this.maxTroops(p);
       if (p.troops >= max) return 0;
-      const g = (20 + Math.pow(p.troops, 0.73) * 1.2) * (1 - p.troops / max);
+      const g = (20 + Math.pow(p.troops, 0.73) * 1.2) * (1 - p.troops / max) * (1 + FACTORY_BONUS * p.built.factory);
       return p.isHuman ? g : g * this.cfg.botGrowth;
+    }
+
+    goldPerSecond(p) {
+      const g = 1 + 0.25 * Math.sqrt(p.tiles) + CITY_GOLD * p.built.city;
+      return p.isHuman ? g : g * this.cfg.botGold;
+    }
+
+    // ---------- Постройки ----------
+
+    buildCost(p, type) {
+      return Math.round(BUILDINGS[type].cost * Math.pow(COST_GROWTH, p.built[type]));
+    }
+
+    // Почему нельзя строить здесь (или null, если можно)
+    buildProblem(pid, type, i) {
+      const p = this.players[pid];
+      if (!BUILDINGS[type] || !p.alive || this.phase !== 'play') return 'invalid';
+      if (i < 0 || this.owner[i] !== pid || this.map.terrain[i] === 0) return 'notmine';
+      if (p.gold < this.buildCost(p, type)) return 'gold';
+      const W = this.W, x = i % W, y = (i / W) | 0, R = BUILD_SPACING;
+      for (let dy = -R; dy <= R; dy++) {
+        for (let dx = -R; dx <= R; dx++) {
+          const xx = x + dx, yy = y + dy;
+          if (xx < 0 || yy < 0 || xx >= W || yy >= this.H) continue;
+          if (this.buildings.has(yy * W + xx)) return 'near';
+        }
+      }
+      return null;
+    }
+
+    build(pid, type, i) {
+      const problem = this.buildProblem(pid, type, i);
+      if (problem) return problem;
+      const p = this.players[pid];
+      p.gold -= this.buildCost(p, type);
+      this.buildings.set(i, type);
+      p.built[type]++;
+      if (type === 'fort') p.forts.add(i);
+      return 'ok';
+    }
+
+    // Во сколько раз дороже захватить клетку из-за крепостей её владельца
+    fortFactor(tgt, j) {
+      if (!tgt || tgt.forts.size === 0) return 1;
+      const W = this.W, x = j % W, y = (j / W) | 0, R2 = FORT_RADIUS * FORT_RADIUS;
+      for (const f of tgt.forts) {
+        const dx = (f % W) - x, dy = ((f / W) | 0) - y;
+        if (dx * dx + dy * dy <= R2) return FORT_MULT;
+      }
+      return 1;
     }
 
     // ---------- Появление на карте ----------
@@ -157,7 +231,7 @@
         this.events.push({ text: 'Место выбрано случайно', cls: 'info', focus: true });
       }
       this.phase = 'play';
-      this.events.push({ text: 'Игра началась! Захватывайте земли', cls: 'good' });
+      this.events.push({ text: `Игра началась! Перемирие с соседями: ${this.cfg.truce} с`, cls: 'good' });
     }
 
     // ---------- Клетки ----------
@@ -185,6 +259,8 @@
         o.tiles--; o.sx -= x; o.sy -= y;
         o.border.delete(i);
       }
+      const b = this.buildings.get(i);
+      if (b) this.transferBuilding(i, b, old, pid);
       this.owner[i] = pid;
       if (pid >= 0) {
         const p = this.players[pid];
@@ -197,6 +273,21 @@
       if (y > 0) this.refreshBorder(i - W);
       if (y < this.H - 1) this.refreshBorder(i + W);
       this.dirty.push(i);
+    }
+
+    transferBuilding(i, type, from, to) {
+      if (from >= 0) {
+        const o = this.players[from];
+        o.built[type]--;
+        o.forts.delete(i);
+      }
+      if (to < 0) { this.buildings.delete(i); return; }
+      const p = this.players[to];
+      p.built[type]++;
+      if (type === 'fort') p.forts.add(i);
+      const name = BUILDINGS[type].name.toLowerCase();
+      if (p.isHuman && from >= 0) this.events.push({ text: `Захвачен ${name}: ${this.players[from].name}`, cls: 'good' });
+      else if (from >= 0 && this.players[from].isHuman) this.events.push({ text: `${p.name} захватила ваш ${name}`, cls: 'bad' });
     }
 
     // Есть ли у игрока общая граница с целью (-1 = ничейная земля)
@@ -278,6 +369,7 @@
 
       // Приоритет клетки: ближе к центру страны, больше соседей-своих, легче местность.
       // Так территория растёт округлыми волнами и обходит горы.
+      const fortified = tgt && tgt.forts.size > 0;
       const consider = (j) => {
         if (o[j] !== target || ter[j] === 0 || mark[j] === stamp) return;
         mark[j] = stamp;
@@ -289,7 +381,9 @@
         if (j < N - W && o[j + W] === me) c++;
         const dx = x - cx, dy = y - cy;
         cands.push(j);
-        keys.push(Math.sqrt(dx * dx + dy * dy) - c * 0.9 + (TERRAIN_COST[ter[j]] - 1) * 2.5 + rnd() * 2.2);
+        let key = Math.sqrt(dx * dx + dy * dy) - c * 0.9 + (TERRAIN_COST[ter[j]] - 1) * 2.5 + rnd() * 2.2;
+        if (fortified && this.fortFactor(tgt, j) > 1) key += 4; // укреплённые земли обходим
+        keys.push(key);
       };
 
       for (const i of p.border) {
@@ -318,7 +412,7 @@
 
       for (const k of order) {
         const j = cands[k];
-        const cost = baseCost * TERRAIN_COST[ter[j]];
+        const cost = baseCost * TERRAIN_COST[ter[j]] * (fortified ? this.fortFactor(tgt, j) : 1);
         if (a.troops < cost) { this.endAttack(a, 1); return; }
         a.troops -= cost;
         if (tgt) tgt.troops = Math.max(0, tgt.troops - density);
@@ -358,7 +452,12 @@
       this.playTick++;
 
       for (const p of this.players) {
-        if (p.alive) p.troops += this.growthPerSecond(p) / TPS;
+        if (!p.alive) continue;
+        p.troops += this.growthPerSecond(p) / TPS;
+        p.gold += this.goldPerSecond(p) / TPS;
+      }
+      if (this.truceTicks > 0 && --this.truceTicks === 0 && this.human.alive) {
+        this.events.push({ text: 'Перемирие окончено — соседи могут напасть', cls: 'bad' });
       }
 
       TW.Bots.think(this);
