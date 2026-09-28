@@ -70,10 +70,11 @@
       const myDensity = p.troops / Math.max(1, p.tiles);
       const leader = game.leaderCache;
       const human = game.human;
-      // Против игрока одновременно воюет ограниченное число ботов, а в начале действует перемирие
+      // Против игрока одновременно воюет ограниченное число ботов (даже обиженных),
+      // а в начале действует перемирие — его нарушает только нападение игрока
       let humanOk = true;
-      if (!p.isHuman && human && bot.grudge !== human.id) {
-        if (game.truceTicks > 0) humanOk = false;
+      if (!p.isHuman && human) {
+        if (game.truceTicks > 0 && bot.grudge !== human.id) humanOk = false;
         else if (!game.attacks.some((a) => a.attacker === p.id && a.target === human.id)) {
           let n = 0;
           for (const a of game.attacks) if (a.target === human.id && a.attacker !== p.id) n++;
